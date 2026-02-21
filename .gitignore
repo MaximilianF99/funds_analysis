@@ -1,0 +1,20 @@
+# Virtual environment
+funds_analysis/
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Output files
+*.json
