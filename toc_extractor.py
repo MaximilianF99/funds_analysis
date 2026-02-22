@@ -25,12 +25,18 @@ Context you must know:
 Extraction rules:
 1. Identify the master fund (umbrella fund) name from headers or the TOC title area.
 2. Extract every sub-fund listed in the TOC with its starting page number.
-3. For each sub-fund, also capture named sub-sections if the TOC provides them \
-   (e.g., "Statement of Net Assets", "Statement of Operations", "Schedule of Investments").
-4. Distinguish actual sub-fund names from generic report sections \
+3. For each sub-fund, determine its end_page: the last page before the NEXT TOC entry \
+   begins — regardless of whether that next entry is another sub-fund or a generic section \
+   (e.g., "Notes to the Financial Statements"). For the last sub-fund, use the last page \
+   number visible in the TOC as end_page.
+4. For each sub-fund, also capture named sub-sections if the TOC provides them \
+   (e.g., "Statement of Net Assets", "Statement of Operations", "Schedule of Investments"). \
+   For each section, determine its end_page the same way: the page before the next TOC entry \
+   starts. The last section of a sub-fund ends on the sub-fund's own end_page.
+5. Distinguish actual sub-fund names from generic report sections \
    ("Notes to the Financial Statements", "Report of the Board of Directors" etc. are NOT sub-funds).
-5. If a sub-fund appears multiple times, keep only the first (lowest page number) occurrence.
-6. Return sub-funds ordered by ascending start_page.\
+6. If a sub-fund appears multiple times, keep only the first (lowest page number) occurrence.
+7. Return sub-funds ordered by ascending start_page.\
 """
 
 
@@ -159,6 +165,6 @@ if __name__ == "__main__":
     print(f"\nMaster Fund: {toc.master_fund_name}")
     print(f"Sub-Funds ({len(toc.subfunds)}):\n")
     for sf in toc.subfunds:
-        print(f"  {sf.name} (p. {sf.start_page})")
+        print(f"  {sf.name} (p. {sf.start_page}\u2013{sf.end_page})")
         for sec in sf.sections:
-            print(f"    \u2514\u2500 {sec.title} \u2192 p. {sec.page_number}")
+            print(f"    \u2514\u2500 {sec.title} \u2192 p. {sec.start_page}\u2013{sec.end_page}")

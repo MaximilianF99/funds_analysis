@@ -26,8 +26,15 @@ class TOCSection(BaseModel):
     """Named section within a sub-fund (e.g., 'Statement of Net Assets')."""
 
     title: str = Field(description="Section heading as printed in the TOC")
-    page_number: int = Field(
+    start_page: int = Field(
         description="Page number where this section starts (printed page number)"
+    )
+    end_page: int = Field(
+        description=(
+            "Last page of this section (printed page number). "
+            "This is the page immediately before the next TOC entry starts, "
+            "whether that is another section or the next sub-fund."
+        )
     )
 
 
@@ -37,6 +44,13 @@ class SubFundEntry(BaseModel):
     name: str = Field(description="Official sub-fund name as listed in the TOC")
     start_page: int = Field(
         description="Page number where this sub-fund's content begins (printed page number)"
+    )
+    end_page: int = Field(
+        description=(
+            "Last page belonging to this sub-fund (printed page number). "
+            "This is the page immediately before the next TOC entry starts, "
+            "whether that entry is another sub-fund or a general section."
+        )
     )
     sections: list[TOCSection] = Field(
         default_factory=list,
