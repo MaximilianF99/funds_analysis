@@ -82,10 +82,16 @@ def run(
     parsed_toc = toc_extractor.extract_from_navigator(toc_pages)
 
     logger.info(
-        "Extracted %d sub-funds for '%s'",
+        "Extracted %d sub-funds, %d shared sections for '%s'",
         len(parsed_toc.subfunds),
+        len(parsed_toc.shared_sections),
         parsed_toc.master_fund_name,
     )
+    if parsed_toc.shared_sections:
+        logger.info(
+            "Shared sections: %s",
+            [(s.title, s.start_page, s.end_page) for s in parsed_toc.shared_sections],
+        )
 
     if toc_only:
         return {
@@ -116,7 +122,7 @@ def run(
         )
 
     extractor = SubFundExtractor(reader, model=model)
-    results = extractor.extract_all(entries)
+    results = extractor.extract_all(entries, shared_sections=parsed_toc.shared_sections)
 
     report = ExtractionReport(
         source_file=pdf_path.name,
