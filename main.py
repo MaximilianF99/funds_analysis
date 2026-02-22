@@ -6,7 +6,10 @@ import logging
 import sys
 from pathlib import Path
 
+from models import ExtractionReport
+from page_reader import PageReader
 from pdf_navigator import find_probable_toc_pages
+from subfund_extractor import SubFundExtractor
 from toc_extractor import TOCExtractor
 
 logger = logging.getLogger(__name__)
@@ -35,6 +38,16 @@ def build_cli() -> argparse.ArgumentParser:
         help="Anthropic model identifier (default: %(default)s)",
     )
     parser.add_argument(
+        "--toc-only",
+        action="store_true",
+        help="Stop after TOC extraction (Steps 1+2) and output the parsed TOC",
+    )
+    parser.add_argument(
+        "--subfund",
+        default=None,
+        help="Extract only sub-funds whose name contains this substring (case-insensitive)",
+    )
+    parser.add_argument(
         "-v", "--verbose",
         action="store_true",
         help="Enable verbose logging",
@@ -42,7 +55,12 @@ def build_cli() -> argparse.ArgumentParser:
     return parser
 
 
-def run(pdf_path: Path, model: str) -> dict:
+def run(
+    pdf_path: Path,
+    model: str,
+    subfund_filter: str | None = None,
+    toc_only: bool = False,
+) -> dict:
     """Execute the full extraction pipeline and return the result dict."""
 
     # Step 1 — Heuristic TOC page detection
@@ -60,8 +78,8 @@ def run(pdf_path: Path, model: str) -> dict:
     )
 
     # Step 2 — LLM-based TOC parsing
-    extractor = TOCExtractor(model=model)
-    parsed_toc = extractor.extract_from_navigator(toc_pages)
+    toc_extractor = TOCExtractor(model=model)
+    parsed_toc = toc_extractor.extract_from_navigator(toc_pages)
 
     logger.info(
         "Extracted %d sub-funds for '%s'",
@@ -69,15 +87,43 @@ def run(pdf_path: Path, model: str) -> dict:
         parsed_toc.master_fund_name,
     )
 
-    # Step 3 — Per-subfund data extraction (future component)
-    # TODO: DataExtractor will iterate over parsed_toc.subfunds,
-    #       read their page ranges, and extract the required variables
-    #       (NAV, currency, share classes, income/expenses, etc.)
+    if toc_only:
+        return {
+            "source_file": pdf_path.name,
+            "toc": parsed_toc.model_dump(mode="json"),
+        }
 
-    return {
-        "source_file": pdf_path.name,
-        "toc": parsed_toc.model_dump(mode="json"),
-    }
+    # Step 3 — Calibrate page reader
+    reader = PageReader(str(pdf_path), model=model)
+    reader.calibrate(parsed_toc)
+
+    # Step 4 — Per-subfund data extraction
+    entries = parsed_toc.subfunds
+    if subfund_filter:
+        needle = subfund_filter.lower()
+        entries = [e for e in entries if needle in e.name.lower()]
+        if not entries:
+            logger.error(
+                "No sub-fund matching '%s' found in TOC (available: %s)",
+                subfund_filter,
+                [sf.name for sf in parsed_toc.subfunds],
+            )
+            sys.exit(1)
+        logger.info(
+            "Filtered to %d sub-fund(s) matching '%s'",
+            len(entries),
+            subfund_filter,
+        )
+
+    extractor = SubFundExtractor(reader, model=model)
+    results = extractor.extract_all(entries)
+
+    report = ExtractionReport(
+        source_file=pdf_path.name,
+        master_fund_name=parsed_toc.master_fund_name,
+        subfunds=results,
+    )
+    return report.model_dump(mode="json")
 
 
 def main() -> None:
@@ -93,7 +139,12 @@ def main() -> None:
         print(f"Error: file not found: {args.input_pdf}", file=sys.stderr)
         sys.exit(1)
 
-    result = run(args.input_pdf, model=args.model)
+    result = run(
+        args.input_pdf,
+        model=args.model,
+        subfund_filter=args.subfund,
+        toc_only=args.toc_only,
+    )
     output_json = json.dumps(result, indent=2, ensure_ascii=False)
 
     if args.out:
