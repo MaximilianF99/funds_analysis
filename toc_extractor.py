@@ -6,6 +6,7 @@ from typing import Any
 from anthropic import Anthropic
 from pydantic import ValidationError
 
+from llm_utils import resolve_refs
 from models import ParsedTOC, TOCPage
 
 logger = logging.getLogger(__name__)
@@ -103,35 +104,16 @@ class TOCExtractor:
 
         return "\n\n".join([header, *page_blocks, footer])
 
-    def _tool_definition(self) -> dict[str, Any]:
+    @staticmethod
+    def _tool_definition() -> dict[str, Any]:
         return {
             "name": "extract_toc",
             "description": (
                 "Submit the fully parsed Table of Contents with the master fund name "
                 "and every identified sub-fund."
             ),
-            "input_schema": self._resolve_refs(ParsedTOC.model_json_schema()),
+            "input_schema": resolve_refs(ParsedTOC.model_json_schema()),
         }
-
-    @staticmethod
-    def _resolve_refs(schema: dict) -> dict:
-        """Inline JSON Schema $defs/$ref for maximum API compatibility."""
-        if "$defs" not in schema:
-            return schema
-
-        defs = schema.pop("$defs")
-
-        def _walk(node: Any) -> Any:
-            if isinstance(node, dict):
-                if "$ref" in node:
-                    ref_name = node["$ref"].split("/")[-1]
-                    return _walk(defs[ref_name])
-                return {k: _walk(v) for k, v in node.items()}
-            if isinstance(node, list):
-                return [_walk(item) for item in node]
-            return node
-
-        return _walk(schema)
 
     @staticmethod
     def _parse_response(response: Any) -> ParsedTOC:
