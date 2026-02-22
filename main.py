@@ -6,6 +6,7 @@ import logging
 import sys
 from pathlib import Path
 
+from llm_client import create_client
 from models import ExtractionReport
 from page_reader import PageReader
 from pdf_navigator import find_probable_toc_pages
@@ -35,7 +36,7 @@ def build_cli() -> argparse.ArgumentParser:
     parser.add_argument(
         "--model",
         default="claude-sonnet-4-6",
-        help="Anthropic model identifier (default: %(default)s)",
+        help="LLM model identifier, e.g. claude-sonnet-4-6 or gemini-2.5-flash (default: %(default)s)",
     )
     parser.add_argument(
         "--toc-only",
@@ -63,6 +64,8 @@ def run(
 ) -> dict:
     """Execute the full extraction pipeline and return the result dict."""
 
+    client = create_client(model)
+
     # Step 1 — Heuristic TOC page detection
     logger.info("Scanning PDF for Table of Contents pages …")
     toc_pages = find_probable_toc_pages(str(pdf_path))
@@ -78,7 +81,7 @@ def run(
     )
 
     # Step 2 — LLM-based TOC parsing
-    toc_extractor = TOCExtractor(model=model)
+    toc_extractor = TOCExtractor(client=client)
     parsed_toc = toc_extractor.extract_from_navigator(toc_pages)
 
     logger.info(
@@ -100,7 +103,7 @@ def run(
         }
 
     # Step 3 — Calibrate page reader
-    reader = PageReader(str(pdf_path), model=model)
+    reader = PageReader(str(pdf_path), client=client)
     reader.calibrate(parsed_toc)
 
     # Step 4 — Per-subfund data extraction
@@ -121,7 +124,7 @@ def run(
             subfund_filter,
         )
 
-    extractor = SubFundExtractor(reader, model=model)
+    extractor = SubFundExtractor(reader, client=client)
     results = extractor.extract_all(entries, shared_sections=parsed_toc.shared_sections)
 
     report = ExtractionReport(

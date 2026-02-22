@@ -1,16 +1,20 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+import re
 
-from anthropic import Anthropic
 from pydantic import ValidationError
 
-from llm_utils import resolve_refs
+from llm_client import LLMClient, resolve_refs
 from models import SubFundEntry, SubFundResult, TOCSection
 from page_reader import PageReader
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_ws(text: str) -> str:
+    """Collapse all whitespace sequences into a single space."""
+    return re.sub(r"\s+", " ", text).strip()
 
 _MAX_UNFILTERED_PAGES = 5
 
@@ -63,6 +67,7 @@ _SECTION_KEYWORDS_NOTES: frozenset[str] = frozenset({
     "notes",
     "anhang",
     "annexe",
+    "key figures",
 })
 
 _ALL_RELEVANT_KEYWORDS: frozenset[str] = (
@@ -107,14 +112,19 @@ Extraction guidelines:
   the target sub-fund by matching the fund name in the column header.\
 """
 
+_TOOL_NAME = "extract_subfund_data"
+_TOOL_DESCRIPTION = (
+    "Submit the extracted financial data for a single sub-fund, "
+    "including NAV, share classes, income/expenses, and reporting period."
+)
+
 
 class SubFundExtractor:
     """Extracts structured financial data from sub-fund pages via a single LLM call."""
 
-    def __init__(self, page_reader: PageReader, model: str = "claude-sonnet-4-6"):
-        self.page_reader = page_reader
-        self.client = Anthropic()
-        self.model = model
+    def __init__(self, page_reader: PageReader, client: LLMClient):
+        self._page_reader = page_reader
+        self._client = client
 
     def extract(
         self,
@@ -145,16 +155,30 @@ class SubFundExtractor:
             sorted(pages.keys()),
         )
 
-        response = self.client.messages.create(
-            model=self.model,
-            max_tokens=8192,
-            system=_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": user_message}],
-            tools=[self._tool_definition()],
-            tool_choice={"type": "tool", "name": "extract_subfund_data"},
-        )
+        try:
+            result_data = self._client.call_with_tool(
+                system=_SYSTEM_PROMPT,
+                user_message=user_message,
+                tool_name=_TOOL_NAME,
+                tool_description=_TOOL_DESCRIPTION,
+                input_schema=resolve_refs(SubFundResult.model_json_schema()),
+            )
+            result = SubFundResult.model_validate(result_data.tool_input)
+        except (ValueError, ValidationError) as exc:
+            logger.error(
+                "Extraction failed for '%s' after all retries (%s) — "
+                "returning empty result",
+                entry.name,
+                exc,
+            )
+            return SubFundResult(
+                subfund_name=entry.name,
+                missing_fields=[
+                    "fund_currency", "total_nav", "share_classes",
+                    "income_expenses", "reporting_period_start", "reporting_period_end",
+                ],
+            )
 
-        result = self._parse_response(response, entry.name)
         logger.info(
             "Extracted data for '%s' — NAV=%s, %d share classes, %d income/expense items, "
             "missing: %s",
@@ -191,15 +215,15 @@ class SubFundExtractor:
 
         if subfund_nav or subfund_income:
             if subfund_nav:
-                pages.update(self.page_reader.get_range_text(
+                pages.update(self._page_reader.get_range_text(
                     subfund_nav.start_page, subfund_nav.end_page,
                 ))
             if subfund_income:
-                pages.update(self.page_reader.get_range_text(
+                pages.update(self._page_reader.get_range_text(
                     subfund_income.start_page, subfund_income.end_page,
                 ))
         else:
-            pages.update(self.page_reader.get_range_text(
+            pages.update(self._page_reader.get_range_text(
                 entry.start_page, entry.end_page,
             ))
 
@@ -217,10 +241,10 @@ class SubFundExtractor:
         pages: dict[int, str] = {}
 
         for section in shared_sections:
-            if not self._is_relevant_shared_section(section.title):
+            if not self._is_relevant_shared_section(section.title): #Hier wird Statement of Operations nicht gefunden
                 continue
 
-            section_pages = self.page_reader.get_range_text(
+            section_pages = self._page_reader.get_range_text(
                 section.start_page, section.end_page,
             )
             section_length = section.end_page - section.start_page + 1
@@ -250,7 +274,7 @@ class SubFundExtractor:
 
     @staticmethod
     def _is_relevant_shared_section(title: str) -> bool:
-        title_lower = title.lower()
+        title_lower = _normalize_ws(title.lower())
         return any(kw in title_lower for kw in _ALL_RELEVANT_KEYWORDS)
 
     @staticmethod
@@ -259,14 +283,15 @@ class SubFundExtractor:
         subfund_name: str,
     ) -> dict[int, str]:
         """Keep only pages that mention the sub-fund by name (case-insensitive)."""
-        needle = subfund_name.lower()
+        needle = _normalize_ws(subfund_name.lower())
         tokens = needle.split()
         short_name = " ".join(tokens[-3:]) if len(tokens) > 3 else needle
 
         return {
             page_num: text
             for page_num, text in pages.items()
-            if needle in text.lower() or short_name in text.lower()
+            if needle in _normalize_ws(text.lower())
+            or short_name in _normalize_ws(text.lower())
         }
 
     @staticmethod
@@ -276,7 +301,7 @@ class SubFundExtractor:
     ) -> TOCSection | None:
         """Find the first section whose title matches any of the keywords."""
         for section in sections:
-            title_lower = section.title.lower()
+            title_lower = _normalize_ws(section.title.lower())
             if any(kw in title_lower for kw in keywords):
                 return section
         return None
@@ -304,31 +329,3 @@ class SubFundExtractor:
         )
 
         return "\n\n".join([header, *page_blocks, footer])
-
-    @staticmethod
-    def _tool_definition() -> dict[str, Any]:
-        return {
-            "name": "extract_subfund_data",
-            "description": (
-                "Submit the extracted financial data for a single sub-fund, "
-                "including NAV, share classes, income/expenses, and reporting period."
-            ),
-            "input_schema": resolve_refs(SubFundResult.model_json_schema()),
-        }
-
-    @staticmethod
-    def _parse_response(response: Any, subfund_name: str) -> SubFundResult:
-        for block in response.content:
-            if block.type == "tool_use" and block.name == "extract_subfund_data":
-                try:
-                    return SubFundResult.model_validate(block.input)
-                except ValidationError:
-                    logger.exception(
-                        "LLM response for '%s' failed schema validation", subfund_name
-                    )
-                    raise
-
-        raise ValueError(
-            f"No extract_subfund_data tool call in LLM response for '{subfund_name}' "
-            f"(stop_reason={response.stop_reason})"
-        )

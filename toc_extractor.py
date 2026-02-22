@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
 
-from anthropic import Anthropic
 from pydantic import ValidationError
 
-from llm_utils import resolve_refs
+from llm_client import LLMClient, resolve_refs
 from models import ParsedTOC, TOCPage
 
 logger = logging.getLogger(__name__)
@@ -48,13 +46,18 @@ Extraction rules:
    "Directors and Other Information" or "Report of the Board of Directors".\
 """
 
+_TOOL_NAME = "extract_toc"
+_TOOL_DESCRIPTION = (
+    "Submit the fully parsed Table of Contents with the master fund name "
+    "and every identified sub-fund."
+)
+
 
 class TOCExtractor:
     """LLM-based parser that converts raw TOC page text into structured sub-fund data."""
 
-    def __init__(self, model: str = "claude-sonnet-4-6"):
-        self.client = Anthropic()
-        self.model = model
+    def __init__(self, client: LLMClient):
+        self._client = client
 
     def extract(self, toc_pages: list[TOCPage]) -> ParsedTOC:
         """Send candidate TOC pages to the LLM and return structured TOC data."""
@@ -63,21 +66,25 @@ class TOCExtractor:
 
         logger.info(
             "Extracting TOC via %s from %d candidate pages (PDF pages: %s)",
-            self.model,
+            self._client.model,
             len(toc_pages),
             [p.page_number for p in toc_pages],
         )
 
-        response = self.client.messages.create(
-            model=self.model,
-            max_tokens=8192,
+        result_data = self._client.call_with_tool(
             system=_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": self._build_user_message(toc_pages)}],
-            tools=[self._tool_definition()],
-            tool_choice={"type": "tool", "name": "extract_toc"},
+            user_message=self._build_user_message(toc_pages),
+            tool_name=_TOOL_NAME,
+            tool_description=_TOOL_DESCRIPTION,
+            input_schema=resolve_refs(ParsedTOC.model_json_schema()),
         )
 
-        result = self._parse_response(response)
+        try:
+            result = ParsedTOC.model_validate(result_data.tool_input)
+        except ValidationError:
+            logger.exception("LLM response failed schema validation")
+            raise
+
         logger.info(
             "Parsed TOC for '%s' — %d sub-funds, %d shared sections extracted",
             result.master_fund_name,
@@ -113,28 +120,3 @@ class TOCExtractor:
         )
 
         return "\n\n".join([header, *page_blocks, footer])
-
-    @staticmethod
-    def _tool_definition() -> dict[str, Any]:
-        return {
-            "name": "extract_toc",
-            "description": (
-                "Submit the fully parsed Table of Contents with the master fund name "
-                "and every identified sub-fund."
-            ),
-            "input_schema": resolve_refs(ParsedTOC.model_json_schema()),
-        }
-
-    @staticmethod
-    def _parse_response(response: Any) -> ParsedTOC:
-        for block in response.content:
-            if block.type == "tool_use" and block.name == "extract_toc":
-                try:
-                    return ParsedTOC.model_validate(block.input)
-                except ValidationError:
-                    logger.exception("LLM response failed schema validation")
-                    raise
-
-        raise ValueError(
-            f"No extract_toc tool call in LLM response (stop_reason={response.stop_reason})"
-        )
