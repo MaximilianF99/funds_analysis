@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class TOCPage(BaseModel):
@@ -88,12 +88,28 @@ class ShareClassData(BaseModel):
     currency: str = Field(description="Currency of this share class (ISO 4217, e.g. 'USD')")
     nav: float | None = Field(
         default=None,
-        description="Total Net Asset Value for this share class",
+        description=(
+            "Total Net Asset Value for this share class (the aggregate value, "
+            "typically a large number in the millions or billions). "
+            "Do NOT put the per-share NAV here. If only NAV per share is available, "
+            "leave this null."
+        ),
+    )
+    nav_per_share: float | None = Field(
+        default=None,
+        description="Net Asset Value per individual share for this share class",
     )
     outstanding_shares: float | None = Field(
         default=None,
         description="Number of outstanding shares at the end of the reporting period",
     )
+
+    @model_validator(mode="after")
+    def _compute_nav_from_per_share(self) -> ShareClassData:
+        """Derive total NAV from nav_per_share × outstanding_shares when not provided."""
+        if self.nav is None and self.nav_per_share is not None and self.outstanding_shares is not None:
+            self.nav = round(self.nav_per_share * self.outstanding_shares, 2)
+        return self
 
 
 class IncomeExpenseItem(BaseModel):

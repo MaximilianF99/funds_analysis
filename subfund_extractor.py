@@ -93,7 +93,12 @@ Extract the following data points:
 1. **fund_currency** — The base currency of the sub-fund (ISO 4217).
 2. **total_nav** — The total Net Asset Value of the sub-fund.
 3. **share_classes** — For every share class listed:
-   - name, currency, NAV, and number of outstanding shares at period end.
+   - name, currency, total NAV (the aggregate value for the entire class, typically \
+millions or billions — NOT the per-share value), NAV per share, and number of \
+outstanding shares at period end.
+   - IMPORTANT: Distinguish between "total NAV" (aggregate, large number) and \
+"NAV per share" (small number, typically under 1000). Report each in its \
+respective field. If only one is available, leave the other null.
 4. **income_expenses** — Every income and expense line item from the \
 Statement of Operations / Statement of Comprehensive Income (or equivalent). \
 Use positive amounts for income, negative for expenses.
