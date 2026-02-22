@@ -65,6 +65,15 @@ class ParsedTOC(BaseModel):
     subfunds: list[SubFundEntry] = Field(
         description="All sub-funds listed in the TOC, ordered by start_page"
     )
+    shared_sections: list[TOCSection] = Field(
+        default_factory=list,
+        description=(
+            "Report-level sections that are NOT specific to a single sub-fund "
+            "(e.g. 'Statement of Financial Position', 'Statement of Comprehensive Income', "
+            "'Notes to the Financial Statements'). These typically contain consolidated data "
+            "for all sub-funds and appear separately from the per-sub-fund sections in the TOC."
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
