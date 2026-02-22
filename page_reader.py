@@ -4,9 +4,9 @@ import logging
 from collections import Counter
 from typing import Any
 
-from anthropic import Anthropic
 from pypdf import PdfReader
 
+from llm_client import LLMClient
 from models import ParsedTOC, SubFundEntry
 
 logger = logging.getLogger(__name__)
@@ -14,6 +14,22 @@ logger = logging.getLogger(__name__)
 logging.getLogger("pypdf").setLevel(logging.ERROR)
 
 _NUM_SAMPLES = 3
+
+_PAGE_NUMBER_TOOL_NAME = "report_page_number"
+_PAGE_NUMBER_TOOL_DESCRIPTION = "Report the printed page number found on this page."
+_PAGE_NUMBER_TOOL_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "required": ["printed_page_number"],
+    "properties": {
+        "printed_page_number": {
+            "type": "integer",
+            "description": (
+                "The printed page number visible in the "
+                "header or footer of this page"
+            ),
+        }
+    },
+}
 
 
 class PageReader:
@@ -24,11 +40,10 @@ class PageReader:
     page number from sample pages, then applying a majority vote.
     """
 
-    def __init__(self, pdf_path: str, model: str = "claude-sonnet-4-6"):
+    def __init__(self, pdf_path: str, client: LLMClient):
         self.reader = PdfReader(pdf_path)
         self.total_pages = len(self.reader.pages)
-        self.model = model
-        self.client = Anthropic()
+        self._client = client
         self._offset: int | None = None
 
     def calibrate(self, toc: ParsedTOC) -> None:
@@ -115,47 +130,25 @@ class PageReader:
 
     def _detect_printed_page(self, page_text: str) -> int | None:
         """Ask the LLM to read the printed page number from a page's text."""
-        response = self.client.messages.create(
-            model=self.model,
-            max_tokens=128,
-            system=(
-                "You receive the extracted text of a single PDF page. "
-                "Determine the printed page number as shown on the page itself "
-                "(typically found in the header or footer). "
-                "Report only the numeric page number."
-            ),
-            messages=[
-                {"role": "user", "content": f"--- PAGE TEXT ---\n{page_text}"}
-            ],
-            tools=[self._page_number_tool()],
-            tool_choice={"type": "tool", "name": "report_page_number"},
-        )
+        try:
+            result = self._client.call_with_tool(
+                system=(
+                    "You receive the extracted text of a single PDF page. "
+                    "Determine the printed page number as shown on the page itself "
+                    "(typically found in the header or footer). "
+                    "Report only the numeric page number."
+                ),
+                user_message=f"--- PAGE TEXT ---\n{page_text}",
+                tool_name=_PAGE_NUMBER_TOOL_NAME,
+                tool_description=_PAGE_NUMBER_TOOL_DESCRIPTION,
+                input_schema=_PAGE_NUMBER_TOOL_SCHEMA,
+                max_tokens=128,
+            )
+        except (ValueError, Exception):
+            logger.debug("LLM failed to return a valid page number tool call")
+            return None
 
-        for block in response.content:
-            if block.type == "tool_use" and block.name == "report_page_number":
-                return block.input.get("printed_page_number")
-
-        return None
-
-    @staticmethod
-    def _page_number_tool() -> dict[str, Any]:
-        return {
-            "name": "report_page_number",
-            "description": "Report the printed page number found on this page.",
-            "input_schema": {
-                "type": "object",
-                "required": ["printed_page_number"],
-                "properties": {
-                    "printed_page_number": {
-                        "type": "integer",
-                        "description": (
-                            "The printed page number visible in the "
-                            "header or footer of this page"
-                        ),
-                    }
-                },
-            },
-        }
+        return result.tool_input.get("printed_page_number")
 
     @property
     def offset(self) -> int:

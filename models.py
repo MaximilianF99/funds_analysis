@@ -100,8 +100,9 @@ class IncomeExpenseItem(BaseModel):
     """Single line item from the Statement of Operations."""
 
     name: str = Field(description="Name of the income or expense position as printed")
-    amount: float = Field(
-        description="Amount in fund currency (positive = income, negative = expense)"
+    amount: float | None = Field(
+        default=None,
+        description="Amount in fund currency (positive = income, negative = expense)",
     )
 
 
