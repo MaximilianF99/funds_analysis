@@ -146,25 +146,3 @@ class TOCExtractor:
         raise ValueError(
             f"No extract_toc tool call in LLM response (stop_reason={response.stop_reason})"
         )
-
-
-if __name__ == "__main__":
-    from pdf_navigator import find_probable_toc_pages
-
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(name)s | %(levelname)s | %(message)s",
-    )
-
-    pdf_path = "funds_files/Goldman_Sachs_Funds_PLC_SAR.pdf"
-    raw_pages = find_probable_toc_pages(pdf_path)
-
-    extractor = TOCExtractor()
-    toc = extractor.extract_from_navigator(raw_pages)
-
-    print(f"\nMaster Fund: {toc.master_fund_name}")
-    print(f"Sub-Funds ({len(toc.subfunds)}):\n")
-    for sf in toc.subfunds:
-        print(f"  {sf.name} (p. {sf.start_page}\u2013{sf.end_page})")
-        for sec in sf.sections:
-            print(f"    \u2514\u2500 {sec.title} \u2192 p. {sec.start_page}\u2013{sec.end_page}")

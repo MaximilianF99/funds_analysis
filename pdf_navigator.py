@@ -54,11 +54,3 @@ def find_probable_toc_pages(pdf_path: str, top_n: int = 5) -> list[dict]:
     best_pages = sorted(page_scores[:top_n], key=lambda x: x["page_num"])
     
     return best_pages
-
-# === Testlauf ===
-if __name__ == "__main__":
-    pdf_path = "funds_files\Goldman_Sachs_Funds_PLC_SAR.pdf"
-    toc_pages = find_probable_toc_pages(pdf_path)
-    
-    for p in toc_pages:
-        print(f"Seite {p['page_num']} (Score: {p['score']})")
