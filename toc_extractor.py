@@ -14,7 +14,8 @@ logger = logging.getLogger(__name__)
 _SYSTEM_PROMPT = """\
 You are a financial document analyst specializing in investment fund reports.
 Your task: parse raw text from Table of Contents (TOC) pages and extract a \
-structured list of all sub-funds with their page numbers.
+structured list of all sub-funds with their page numbers, plus any shared \
+report-level sections.
 
 Context you must know:
 - Each page was flagged by a heuristic algorithm as a potential TOC page.
@@ -37,7 +38,14 @@ Extraction rules:
 5. Distinguish actual sub-fund names from generic report sections \
    ("Notes to the Financial Statements", "Report of the Board of Directors" etc. are NOT sub-funds).
 6. If a sub-fund appears multiple times, keep only the first (lowest page number) occurrence.
-7. Return sub-funds ordered by ascending start_page.\
+7. Return sub-funds ordered by ascending start_page.
+8. Capture report-level sections that are NOT part of any specific sub-fund into \
+   shared_sections. These are consolidated financial statements or notes that cover ALL \
+   sub-funds (e.g. "Statement of Financial Position", "Statement of Comprehensive Income", \
+   "Statement of Changes in Net Assets", "Notes to the Financial Statements"). \
+   Determine start_page and end_page for each shared section the same way as for \
+   sub-fund sections. Do NOT include purely administrative sections like \
+   "Directors and Other Information" or "Report of the Board of Directors".\
 """
 
 
@@ -71,9 +79,10 @@ class TOCExtractor:
 
         result = self._parse_response(response)
         logger.info(
-            "Parsed TOC for '%s' — %d sub-funds extracted",
+            "Parsed TOC for '%s' — %d sub-funds, %d shared sections extracted",
             result.master_fund_name,
             len(result.subfunds),
+            len(result.shared_sections),
         )
         return result
 
@@ -98,8 +107,9 @@ class TOCExtractor:
             )
 
         footer = (
-            "Extract the master fund name and all sub-fund entries "
-            "(with their sections where available) using the extract_toc tool."
+            "Extract the master fund name, all sub-fund entries "
+            "(with their sections where available), and any shared report-level "
+            "sections using the extract_toc tool."
         )
 
         return "\n\n".join([header, *page_blocks, footer])
