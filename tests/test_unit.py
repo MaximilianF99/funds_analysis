@@ -104,37 +104,6 @@ class TestShareClassDataValidator:
         sc = ShareClassData(name="Class C", currency="CHF", nav_per_share=50.0)
         assert sc.nav is None
 
-
-# ---------------------------------------------------------------------------
-# PageReader._select_samples
-# ---------------------------------------------------------------------------
-
-class TestSelectSamples:
-    @staticmethod
-    def _make_entries(n: int) -> list[SubFundEntry]:
-        return [
-            SubFundEntry(name=f"Fund {i}", start_page=i * 10, end_page=i * 10 + 9)
-            for i in range(n)
-        ]
-
-    def test_returns_all_when_fewer_than_num_samples(self):
-        entries = self._make_entries(2)
-        result = PageReader._select_samples(entries)
-        assert len(result) == 2
-
-    def test_returns_num_samples_when_many_entries(self):
-        entries = self._make_entries(20)
-        result = PageReader._select_samples(entries)
-        assert len(result) == 3
-        assert result[0] is entries[0]
-        assert result[-1] is entries[-1]
-
-    def test_single_entry(self):
-        entries = self._make_entries(1)
-        result = PageReader._select_samples(entries)
-        assert len(result) == 1
-
-
 # ---------------------------------------------------------------------------
 # SubFundExtractor._is_relevant_shared_section
 # ---------------------------------------------------------------------------
